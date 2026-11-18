@@ -49,6 +49,33 @@ class AskResponse(BaseModel):
 
 
 # ══════════════════════════════════════════════════
+# HELPERS
+# ══════════════════════════════════════════════════
+def _norm_page(p):
+    """Normalize page to int or None so (source, page) keys dedupe correctly."""
+    if p is None or p == "":
+        return None
+    try:
+        return int(p)
+    except (ValueError, TypeError):
+        return str(p).strip() or None
+
+
+def _dedupe_chunks(chunks):
+    """Return unique sources from reranked chunks. Preserves order."""
+    seen = set()
+    sources = []
+    for c in chunks:
+        src_raw = c.get("source", "?")
+        page_raw = c.get("page")
+        key = ((src_raw or "?").strip().lower(), _norm_page(page_raw))
+        if key not in seen:
+            seen.add(key)
+            sources.append(Source(source=src_raw or "?", page=page_raw))
+    return sources
+
+
+# ══════════════════════════════════════════════════
 # ENDPOINTS
 # ══════════════════════════════════════════════════
 @app.get("/health")
@@ -74,15 +101,7 @@ def ask(req: AskRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Pipeline error: {e}")
 
-    # Extract unique sources
-    seen = set()
-    sources = []
-    for c in state.get("reranked_chunks", []):
-        key = (c.get("source"), c.get("page"))
-        if key not in seen:
-            seen.add(key)
-            sources.append(Source(source=c.get("source", "?"), page=c.get("page")))
-
+    sources = _dedupe_chunks(state.get("reranked_chunks", []))
     grade = state.get("grade", "unknown")
 
     return AskResponse(
